@@ -1,0 +1,25 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // Specify PostgreSQL
+  url      = env("DATABASE_URL") // Reads from .env
+}
+
+// Define your Book model
+model Book {
+  id                        Int       @id @default(autoincrement())
+  originalFilename          String
+  cloudinaryOriginalUrl     String?   // Optional fields marked with ?
+  cloudinaryOriginalSecureUrl String?
+  cloudinaryPdfUrl          String?
+  cloudinaryPdfSecureUrl    String?
+  processedAt               DateTime  @default(now()) @db.Timestamptz // Use Timestamptz for timezone
+  errorMessage              String?   // Optional error message
+
+  @@map("books") // Maps this model to the 'books' table in the database
+}

@@ -1,103 +1,243 @@
-import Image from "next/image";
+"use client";
+import React, { useState, useCallback, ChangeEvent, useEffect } from "react";
+import { pdfjs } from "react-pdf";
+import { motion } from "framer-motion";
+import "react-pdf/dist/esm/Page/AnnotationLayer.css";
+import "react-pdf/dist/esm/Page/TextLayer.css";
+import PageHeader from "./components/PageHeader";
+import UploadForm from "./components/UploadForm";
+import StatusMessages from "./components/StatusMessages";
+import PdfPreview from "./components/PdfPreview";
+import DownloadLinks from "./components/DownloadLinks";
+pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
 
-export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+type ProcessingStatus =
+    | "idle"
+    | "uploading"
+    | "processing"
+    | "success"
+    | "error";
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
-  );
+
+const TEMPLATE_OPTIONS = [
+    { value: "classic", label: "Classic Serif" },
+    { value: "modern", label: "Modern Sans" },
+    { value: "minimalist", label: "Minimalist" },
+];
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+export default function HomePage() {
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const [selectedTemplate, setSelectedTemplate] = useState<string>(
+        TEMPLATE_OPTIONS[0].value
+    );
+    const [processingStatus, setProcessingStatus] =
+        useState<ProcessingStatus>("idle");
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [successMessage, setSuccessMessage] = useState<string | null>(null);
+    const [bookId, setBookId] = useState<number | null>(null);
+    const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+    const [originalUrl, setOriginalUrl] = useState<string | null>(null);
+console.log(bookId)
+    const [numPages, setNumPages] = useState<number | null>(null);
+    const [pageNumber, setPageNumber] = useState<number>(1);
+    const [pdfLoadError, setPdfLoadError] = useState<string | null>(null); 
+
+    const isLoading =
+        processingStatus === "uploading" || processingStatus === "processing";
+
+    const resetState = useCallback((clearFile: boolean = true) => {
+        console.log("Resetting state, clearFile:", clearFile);
+        if (clearFile) {
+            setSelectedFile(null);
+            const fileInput = document.getElementById("file-upload") as HTMLInputElement;
+            if (fileInput) {
+                fileInput.value = ""; 
+            }
+        }
+        setProcessingStatus("idle");
+        setErrorMessage(null);
+        setSuccessMessage(null);
+        setPdfUrl(null);
+        setOriginalUrl(null);
+        setBookId(null);
+        setNumPages(null);
+        setPageNumber(1);
+        setPdfLoadError(null);
+    }, []); 
+
+    const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        resetState(false); 
+
+        if (file) {
+            if (file.size > MAX_FILE_SIZE) {
+                setErrorMessage(`File size exceeds ${MAX_FILE_SIZE / (1024 * 1024)}MB limit.`);
+                setSelectedFile(null);
+                event.target.value = "";
+                return;
+            }
+             if (
+                file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+                file.name.toLowerCase().endsWith(".docx")
+            ) {
+                setSelectedFile(file);
+                setErrorMessage(null);
+            } else {
+                setErrorMessage("Invalid file type. Please upload a .docx file.");
+                setSelectedFile(null);
+                event.target.value = "";
+            }
+        } else {
+            setSelectedFile(null);
+        }
+    };
+
+    const handleTemplateChange = (event: ChangeEvent<HTMLSelectElement>) => {
+        setSelectedTemplate(event.target.value);
+    };
+
+    const handleSubmit = useCallback(
+        async (event?: React.FormEvent) => { 
+            event?.preventDefault(); 
+            if (!selectedFile) {
+                setErrorMessage("Please select a .docx file first.");
+                return;
+            }
+
+            setProcessingStatus("uploading");
+            setErrorMessage(null);
+            setSuccessMessage(null);
+            setPdfUrl(null);
+            setOriginalUrl(null);
+            setBookId(null);
+            setNumPages(null);
+            setPageNumber(1);
+            setPdfLoadError(null);
+
+            const formData = new FormData();
+            formData.append("file", selectedFile);
+            formData.append("templateName", selectedTemplate);
+
+            const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "/api";
+
+            try {
+                setProcessingStatus("processing");
+                console.log(`Submitting with template: ${selectedTemplate}`);
+
+                const response = await fetch(`${apiUrl}/process-book`, {
+                    method: "POST",
+                    body: formData,
+                });
+
+                const result = await response.json();
+
+                if (!response.ok || !result.success) {
+                    throw new Error(
+                        result.message || `Processing failed. Status: ${response.status}`
+                    );
+                }
+
+                setProcessingStatus("success");
+                setSuccessMessage("Success! Your book is formatted and ready for preview.");
+                setPdfUrl(result.pdfUrl);
+                setOriginalUrl(result.originalUrl);
+                setBookId(result.bookId);
+
+            } catch (error: any) {
+                console.error("Processing error:", error);
+                setProcessingStatus("error");
+                setErrorMessage(
+                    error.message || "An unexpected error occurred during processing."
+                );
+                setPdfUrl(null);
+                setOriginalUrl(null);
+            }
+        },
+        [selectedFile, selectedTemplate] 
+    );
+
+    const onDocumentLoadSuccess = useCallback(({ numPages }: { numPages: number }): void => {
+        setNumPages(numPages);
+        setPageNumber(1);
+        setPdfLoadError(null);
+    }, []); 
+
+    const onDocumentLoadError = useCallback((error: Error): void => {
+        console.error("Failed to load PDF for preview:", error);
+        let friendlyError = "Failed to load PDF preview. ";
+        if (error.message.includes("40")) { 
+            friendlyError += "The file might be inaccessible or not found.";
+        } else if (error.message.includes("Invalid PDF structure")) {
+            friendlyError += "The generated file appears to be corrupted.";
+        } else if (error.message.includes("Missing PDF")) {
+             friendlyError += "The PDF file is missing or unavailable.";
+        } else {
+            friendlyError += "An issue occurred loading the preview.";
+        }
+        friendlyError += " You can still try downloading the file below."
+        setPdfLoadError(friendlyError);
+        setNumPages(null); 
+    }, []);
+
+    const handlePageChange = useCallback((newPage: number) => {
+        setPageNumber(newPage);
+    }, []); 
+
+    return (
+        <main className={`flex min-h-screen flex-col items-center w-full justify-center p-4 md:p-8 bg-gray-50`}>
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+                className="w-full max-w-4xl bg-white p-6 md:p-10 shadow-lg rounded-xl border border-gray-200"
+            >
+                <PageHeader
+                    title="Book Formatter"
+                    description="Upload your .docx manuscript, choose a style, and get a print-ready PDF."
+                />
+
+                <UploadForm
+                    selectedFile={selectedFile}
+                    selectedTemplate={selectedTemplate}
+                    processingStatus={processingStatus}
+                    isLoading={isLoading}
+                    onFileChange={handleFileChange}
+                    onTemplateChange={handleTemplateChange}
+                    onSubmit={handleSubmit}
+                    onResetClick={() => resetState(true)} 
+                    maxFileSize={MAX_FILE_SIZE}
+                    templateOptions={TEMPLATE_OPTIONS}
+                />
+
+                <StatusMessages
+                    errorMessage={errorMessage}
+                    successMessage={successMessage}
+                    pdfLoadError={pdfLoadError}
+                    onDismissError={() => setErrorMessage(null)}
+                    onDismissSuccess={() => setSuccessMessage(null)}
+                    onDismissPdfLoadError={() => setPdfLoadError(null)}
+                />
+
+                <PdfPreview
+                    pdfUrl={pdfUrl}
+                    processingStatus={processingStatus}
+                    numPages={numPages}
+                    pageNumber={pageNumber}
+                    onDocumentLoadSuccess={onDocumentLoadSuccess}
+                    onDocumentLoadError={onDocumentLoadError}
+                    onPageChange={handlePageChange}
+                    pdfLoadErrorProp={pdfLoadError}
+                />
+
+                <DownloadLinks
+                    originalUrl={originalUrl}
+                    pdfUrl={pdfUrl}
+                    processingStatus={processingStatus}
+                />
+
+            </motion.div>
+        </main>
+    );
 }
